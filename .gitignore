@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# User-provided briefs may contain private service configuration
+/attached_assets/full_prompt_*.txt

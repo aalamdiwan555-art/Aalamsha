@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Aalamsha"
+description = "A cyberpunk auto-clicker control center with a minimal user dashboard, ad-supported subscription tracking, scenario management, and admin controls."
+version = "1.0.0"
+id = "artifacts/aalamsha"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19575
+
+[services.development]
+run = "pnpm --filter @workspace/aalamsha run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/aalamsha", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/aalamsha/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19575"
+BASE_PATH = "/"
