@@ -94,7 +94,7 @@ class AalamScreenService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_autopilot)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("Watching for ride offers")
+            .setContentText(getString(R.string.status_watching))
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -231,13 +231,16 @@ class AalamScreenService : Service() {
                 val result = withContext(Dispatchers.IO) {
                     recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
                 }
-                lastFrameHadHint = result.text.contains("ride", ignoreCase = true) ||
+                lastFrameHadHint = OcrKeywords.containsAccept(result.text) ||
+                    result.text.contains("ride", ignoreCase = true) ||
                     result.text.contains("new", ignoreCase = true) ||
                     result.text.contains("booking", ignoreCase = true)
                 if (OcrKeywords.containsAccept(result.text)) {
                     val targetBounds = findAcceptBounds(result)
                     if (targetBounds != null) {
-                        AalamAccessibilityService.requestAcceptClick(mapCaptureBoundsToScreen(targetBounds))
+                        AalamAccessibilityService.requestAcceptClick(
+                            mapOcrBoundsToScreen(targetBounds, bitmap.width, bitmap.height)
+                        )
                     } else {
                         AalamAccessibilityService.requestAcceptClick()
                     }
@@ -301,16 +304,21 @@ class AalamScreenService : Service() {
         return matches.minByOrNull { it.width() * it.height() }
     }
 
-    private fun mapCaptureBoundsToScreen(bounds: Rect): Rect {
-        if (captureWidth <= 0 || captureHeight <= 0 || screenWidth <= 0 || screenHeight <= 0) {
+    private fun mapOcrBoundsToScreen(bounds: Rect, ocrWidth: Int, ocrHeight: Int): Rect {
+        if (ocrWidth <= 0 || ocrHeight <= 0 || screenWidth <= 0 || screenHeight <= 0) {
             return Rect(bounds)
         }
-        val scaleX = screenWidth.toFloat() / captureWidth
-        val scaleY = screenHeight.toFloat() / captureHeight
-        val left = (bounds.left * scaleX).toInt().coerceIn(0, screenWidth)
-        val top = (bounds.top * scaleY).toInt().coerceIn(0, screenHeight)
-        val right = (bounds.right * scaleX).toInt().coerceIn(0, screenWidth)
-        val bottom = (bounds.bottom * scaleY).toInt().coerceIn(0, screenHeight)
+
+        // ML Kit reports bounds in the resized OCR bitmap, not the full capture.
+        // Using capture dimensions here sends taps to the wrong location after downscaling.
+        val scaleX = screenWidth.toFloat() / ocrWidth
+        val scaleY = screenHeight.toFloat() / ocrHeight
+        val maxX = screenWidth - 1
+        val maxY = screenHeight - 1
+        val left = (bounds.left * scaleX).toInt().coerceIn(0, maxX)
+        val top = (bounds.top * scaleY).toInt().coerceIn(0, maxY)
+        val right = (bounds.right * scaleX).toInt().coerceIn(left + 1, screenWidth)
+        val bottom = (bounds.bottom * scaleY).toInt().coerceIn(top + 1, screenHeight)
         return Rect(left, top, right, bottom)
     }
 
