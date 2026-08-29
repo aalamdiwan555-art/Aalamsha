@@ -3,11 +3,11 @@ package com.autopilot.driver.service
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.app.ServiceInfo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -25,12 +25,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.autopilot.driver.AalamLog
 import com.autopilot.driver.R
-import com.autopilot.driver.automation.AalamAccessibilityService
 
 class FloatingPanelService : Service() {
-    private companion object {
-        const val TAG = AalamLog.TAG
-    }
+    private companion object { const val TAG = AalamLog.TAG }
 
     private var windowManager: WindowManager? = null
     private var panel: View? = null
@@ -41,185 +38,88 @@ class FloatingPanelService : Service() {
     private val runtimeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != "aalam.update") return
-            if (intent.`package` != packageName && intent.getStringExtra("sender") != "internal") return
             val state = intent.getStringExtra("state") ?: "STOPPED"
-            if (state == "STOPPED" || state == "ERROR") {
-                stopSelf()
-            }
+            if (state == "STOPPED" || state == "ERROR") stopSelf()
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        val channelId = "aalam_floating"
+        if (Build.VERSION.SDK_INT >= 26) {
+            val channel = NotificationChannel(channelId, "Floating Controls", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        val notif = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_autopilot)
+            .setContentTitle("Control Panel Active")
+            .setContentText("Floating controls are showing")
+            .setOngoing(true).build()
 
-        // Must start foreground immediately for specialUse service on Android 12+
-        if (Build.VERSION.SDK_INT >= 29) {
-            val channelId = "aalam_floating"
-            if (Build.VERSION.SDK_INT >= 26) {
-                val channel = NotificationChannel(
-                    channelId,
-                    "Floating Controls",
-                    NotificationManager.IMPORTANCE_LOW
-                )
-                getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-            }
-            startForeground(
-                42,
-                NotificationCompat.Builder(this, channelId)
-                    .setSmallIcon(R.drawable.ic_autopilot)
-                    .setContentTitle("Control Panel Active")
-                    .setContentText("Floating controls are showing")
-                    .setOngoing(true)
-                    .build(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(42, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(42, notif)
         }
 
-        if (!Settings.canDrawOverlays(this)) {
-            stopSelf()
-            return
-        }
-        windowManager = getSystemService(WINDOW_SERVICE) as? WindowManager
-        if (windowManager == null) {
-            android.util.Log.e(TAG, "WindowManager is not available")
-            stopSelf()
-            return
-        }
+        if (!Settings.canDrawOverlays(this)) { stopSelf(); return }
+        windowManager = getSystemService(WINDOW_SERVICE) as? WindowManager ?: run { stopSelf(); return }
         registerRuntimeReceiver()
         buildPanel()
     }
 
     private fun buildPanel() {
         if (panel != null) return
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(14, 14, 14, 12)
-            background = roundedBackground(Color.rgb(12, 29, 34), 22f)
+            setPadding(14,14,14,12)
+            background = roundedBackground(Color.rgb(12,29,34), 22f)
         }
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        controls.addView(iconButton(android.R.drawable.ic_media_play, "Resume") {
-            sendAction("com.autopilot.driver.action.RESUME")
-        }, LinearLayout.LayoutParams(44, 44))
-        controls.addView(
-            iconButton(android.R.drawable.ic_media_pause, "Pause") {
-                sendAction("com.autopilot.driver.action.PAUSE")
-            },
-            LinearLayout.LayoutParams(44, 44).apply { topMargin = 4 }
-        )
-        controls.addView(
-            iconButton(android.R.drawable.ic_menu_close_clear_cancel, "Stop") {
-                sendAction("com.autopilot.driver.action.STOP")
-            },
-            LinearLayout.LayoutParams(44, 44).apply { topMargin = 4 }
-        )
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        controls.addView(iconButton(android.R.drawable.ic_media_play, "Resume") { sendAction("com.autopilot.driver.action.RESUME") }, LinearLayout.LayoutParams(44,44))
+        controls.addView(iconButton(android.R.drawable.ic_media_pause, "Pause") { sendAction("com.autopilot.driver.action.PAUSE") }, LinearLayout.LayoutParams(44,44).apply { topMargin = 4 })
+        controls.addView(iconButton(android.R.drawable.ic_menu_close_clear_cancel, "Stop") { sendAction("com.autopilot.driver.action.STOP") }, LinearLayout.LayoutParams(44,44).apply { topMargin = 4 })
         root.addView(controls)
 
         root.setOnTouchListener { _, event ->
             val params = panelParams ?: return@setOnTouchListener false
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    touchX = event.rawX
-                    touchY = event.rawY
-                    true
-                }
+                MotionEvent.ACTION_DOWN -> { touchX = event.rawX; touchY = event.rawY; true }
                 MotionEvent.ACTION_MOVE -> {
                     params.x += (event.rawX - touchX).toInt()
                     params.y += (event.rawY - touchY).toInt()
                     windowManager?.updateViewLayout(root, params)
-                    touchX = event.rawX
-                    touchY = event.rawY
-                    true
+                    touchX = event.rawX; touchY = event.rawY; true
                 }
                 else -> false
             }
         }
-
-        val type = if (Build.VERSION.SDK_INT >= 26) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = 18
-            y = 120
-        }
-        panelParams = params
-        panel = root
-        runCatching { windowManager?.addView(root, params) }
-            .onFailure {
-                android.util.Log.e(TAG, "Unable to attach floating panel", it)
-                panel = null
-                panelParams = null
-                stopSelf()
-            }
+        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        val params = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.END; x = 18; y = 120 }
+        panelParams = params; panel = root
+        runCatching { windowManager?.addView(root, params) }.onFailure { panel = null; panelParams = null; stopSelf() }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        panelParams?.let { params ->
-            params.x = 18
-            params.y = 120
-            panel?.let { view ->
-                runCatching { windowManager?.updateViewLayout(view, params) }
-            }
-        }
+        panelParams?.let { it.x = 18; it.y = 120; panel?.let { v -> runCatching { windowManager?.updateViewLayout(v, it) } } }
     }
 
-    private fun iconButton(icon: Int, description: String, action: () -> Unit): ImageButton =
-        ImageButton(this).apply {
-            setImageResource(icon)
-            contentDescription = description
-            setColorFilter(Color.rgb(120, 230, 208))
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { action() }
-        }
-
-    private fun roundedBackground(color: Int, radius: Float): GradientDrawable =
-        GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = radius
-            setStroke(1, Color.rgb(39, 66, 72))
-        }
-
-    private fun sendAction(action: String) {
-        startService(Intent(this, AalamScreenService::class.java).setAction(action))
+    private fun iconButton(icon: Int, desc: String, action: () -> Unit) = ImageButton(this).apply {
+        setImageResource(icon); contentDescription = desc; setColorFilter(Color.rgb(120,230,208)); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { action() }
     }
-
+    private fun roundedBackground(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius; setStroke(1, Color.rgb(39,66,72)) }
+    private fun sendAction(action: String) { startService(Intent(this, AalamScreenService::class.java).setAction(action)) }
     private fun registerRuntimeReceiver() {
         val filter = IntentFilter("aalam.update")
-        if (Build.VERSION.SDK_INT >= 33) {
-            ContextCompat.registerReceiver(this, runtimeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(runtimeReceiver, filter)
-        }
+        if (Build.VERSION.SDK_INT >= 33) ContextCompat.registerReceiver(this, runtimeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        else @Suppress("DEPRECATION") registerReceiver(runtimeReceiver, filter)
     }
-
     override fun onDestroy() {
         runCatching { unregisterReceiver(runtimeReceiver) }
-        panel?.let { view -> runCatching { windowManager?.removeView(view) } }
-        panel = null
-        panelParams = null
-        windowManager = null
-        super.onDestroy()
+        panel?.let { runCatching { windowManager?.removeView(it) } }
+        panel = null; panelParams = null; windowManager = null; super.onDestroy()
     }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (panel == null) buildPanel()
-        return START_STICKY
-    }
-
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (panel == null) buildPanel(); return START_STICKY }
     override fun onBind(intent: Intent?): IBinder? = null
 }
