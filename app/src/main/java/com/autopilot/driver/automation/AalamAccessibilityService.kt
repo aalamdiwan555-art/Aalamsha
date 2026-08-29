@@ -119,10 +119,6 @@ class AalamAccessibilityService : AccessibilityService() {
             Log.d(TAG, "Gesture skipped: cooldown or another gesture is active")
             return false
         }
-        if (foregroundPackage !in RIDE_PACKAGES) {
-            Log.d(TAG, "Gesture skipped: unsupported package=$foregroundPackage")
-            return false
-        }
         if (bounds.isEmpty) {
             Log.d(TAG, "Gesture skipped: empty bounds")
             return false
@@ -178,10 +174,6 @@ class AalamAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastClickAt < CLICK_COOLDOWN_MS || gestureInFlight) {
             Log.d(TAG, "Node click skipped: cooldown or gesture active")
-            return false
-        }
-        if (foregroundPackage !in RIDE_PACKAGES) {
-            Log.d(TAG, "Node click skipped: unsupported package=$foregroundPackage")
             return false
         }
         val root = rootInActiveWindow ?: run {
