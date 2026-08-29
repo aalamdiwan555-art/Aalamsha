@@ -1,6 +1,9 @@
 package com.autopilot.driver.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
+import android.app.ServiceInfo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,6 +21,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.autopilot.driver.AalamLog
 import com.autopilot.driver.R
@@ -47,6 +51,30 @@ class FloatingPanelService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Must start foreground immediately for specialUse service on Android 12+
+        if (Build.VERSION.SDK_INT >= 29) {
+            val channelId = "aalam_floating"
+            if (Build.VERSION.SDK_INT >= 26) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Floating Controls",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            }
+            startForeground(
+                42,
+                NotificationCompat.Builder(this, channelId)
+                    .setSmallIcon(R.drawable.ic_autopilot)
+                    .setContentTitle("Control Panel Active")
+                    .setContentText("Floating controls are showing")
+                    .setOngoing(true)
+                    .build(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        }
+
         if (!Settings.canDrawOverlays(this)) {
             stopSelf()
             return
@@ -186,6 +214,11 @@ class FloatingPanelService : Service() {
         panelParams = null
         windowManager = null
         super.onDestroy()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (panel == null) buildPanel()
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
