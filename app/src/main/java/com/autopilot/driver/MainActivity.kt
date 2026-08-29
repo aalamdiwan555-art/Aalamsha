@@ -51,7 +51,12 @@ class MainActivity : ComponentActivity() {
                 }
                 startForegroundService(intent)
                 if (Settings.canDrawOverlays(this@MainActivity)) {
-                    startService(Intent(this@MainActivity, FloatingPanelService::class.java))
+                    val fpIntent = Intent(this@MainActivity, FloatingPanelService::class.java)
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        startForegroundService(fpIntent)
+                    } else {
+                        startService(fpIntent)
+                    }
                 }
             }
         }
@@ -116,6 +121,7 @@ class MainActivity : ComponentActivity() {
     private fun stopAalam() {
         lifecycleScope.launch {
             settingsStore.setAutopilotEnabled(false)
+            settingsStore.setCaptureGranted(false)
         }
         stopService(Intent(this, AalamScreenService::class.java))
         stopService(Intent(this, FloatingPanelService::class.java))
