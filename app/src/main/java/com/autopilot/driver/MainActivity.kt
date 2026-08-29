@@ -72,9 +72,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val filter = IntentFilter("aalam.update")
-        ContextCompat.registerReceiver(this, runtimeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        receiverRegistered = true
+        if (!receiverRegistered) {
+            val filter = IntentFilter("aalam.update")
+            ContextCompat.registerReceiver(this, runtimeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            receiverRegistered = true
+        }
 
         setContent {
             AalamTheme {
