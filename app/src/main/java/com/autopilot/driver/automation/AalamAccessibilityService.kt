@@ -102,9 +102,13 @@ class AalamAccessibilityService : AccessibilityService() {
         screenHeight = metrics.heightPixels
 
         serviceInfo = serviceInfo.apply {
-            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             notificationTimeout = 100
         }
     }
@@ -117,7 +121,8 @@ class AalamAccessibilityService : AccessibilityService() {
         if (pkg.isEmpty() || pkg == packageName || !AalamScreenService.isRunning || AalamScreenService.isPaused) return
         when (event?.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
                 // Coalesce event bursts and let the target UI finish rendering.
                 mainHandler.removeCallbacks(treeScan)
                 mainHandler.postDelayed(treeScan, 120L)
@@ -237,10 +242,13 @@ class AalamAccessibilityService : AccessibilityService() {
     private fun findCandidate(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val label = listOf(node.text, node.contentDescription)
             .filterNotNull().joinToString(" ")
-        val flexibleActionMatch = listOf("accept", "confirm", "yes", "ok")
-            .any { label.contains(it, ignoreCase = true) }
-        if ((OcrKeywords.containsAccept(label) || flexibleActionMatch) &&
-            node.isVisibleToUser && node.isEnabled) {
+        val actionMatch = OcrKeywords.containsAccept(label) ||
+            listOf("accept", "confirm", "yes", "ok")
+                .any { label.contains(it, ignoreCase = true) }
+        val visibleAndEnabled = node.isVisibleToUser && node.isEnabled
+
+        // Prefer the actual clickable control when a parent/container also has the label.
+        if (actionMatch && visibleAndEnabled && node.isClickable) {
             return AccessibilityNodeInfo.obtain(node)
         }
         for (i in 0 until node.childCount) {
@@ -249,6 +257,8 @@ class AalamAccessibilityService : AccessibilityService() {
             child.recycle()
             if (result != null) return result
         }
+        // Non-clickable text is still useful: performClick() will walk to its ancestor.
+        if (actionMatch && visibleAndEnabled) return AccessibilityNodeInfo.obtain(node)
         return null
     }
 
