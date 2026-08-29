@@ -1,7 +1,7 @@
 package com.autopilot.driver
 
 object OcrKeywords {
-    val ACCEPT_KEYWORDS = buildSet {
+    private val ACCEPT_KEYWORDS = setOf(
         // English
         "accept", "Accept", "ACCEPT",
         "Accept Ride", "accept ride", "ACCEPT RIDE",
@@ -234,16 +234,10 @@ object OcrKeywords {
         "ᱮᱦᱚᱵ ᱠᱟᱱᱟ", "ᱧᱟᱢ ᱠᱟᱱᱟ",
         "ᱯᱤᱠᱟᱯ", "ᱥᱣᱟᱭᱤᱯ ᱠᱟᱱᱟ",
         "ᱥᱞᱟᱭᱤᱰ ᱠᱟᱱᱟ", "ᱴᱟᱯ ᱠᱟᱱᱟ",
-    }
-
-    private val acceptPattern = Regex(
-        ACCEPT_KEYWORDS
-            .sortedByDescending { it.length }
-            .joinToString("|") { Regex.escape(it) },
-        RegexOption.IGNORE_CASE,
     )
 
-    fun containsAccept(text: String): Boolean = acceptPattern.containsMatchIn(text)
+    fun containsAccept(text: String): Boolean =
+        ACCEPT_KEYWORDS.any { text.contains(it, ignoreCase = true) }
 
     fun findBestMatch(text: String): String? =
         ACCEPT_KEYWORDS.firstOrNull { text.contains(it, ignoreCase = true) }
