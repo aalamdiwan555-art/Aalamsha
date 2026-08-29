@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="autopilot_background">#FF081013</color>
+    <color name="autopilot_primary">#FF78E6D0</color>
+    <color name="autopilot_text">#FFE0EEF0</color>
+    <color name="autopilot_muted">#FF789094</color>
+    <color name="autopilot_success">#FF78E6D0</color>
+    <color name="autopilot_error">#FFFFA9B2</color>
+    <color name="autopilot_warning">#FFFFC86B</color>
+    <color name="autopilot_panel">#FF102126</color>
+    <color name="ink_950">#FF0B161A</color>
+</resources>
