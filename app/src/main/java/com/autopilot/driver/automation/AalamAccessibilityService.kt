@@ -21,7 +21,7 @@ class AalamAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = AalamLog.TAG
         private const val CLICK_COOLDOWN_MS = 500L
-        private const val STROKE_MS = 100L
+        private const val STROKE_MS = 150L
         @Volatile var instance: AalamAccessibilityService? = null
             private set
         @Volatile var foregroundPackage: String = ""
@@ -113,6 +113,18 @@ class AalamAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun clampToScreen(bounds: Rect): Rect? {
+        if (screenWidth <= 0 || screenHeight <= 0) return null
+        if (bounds.right <= 0 || bounds.bottom <= 0 || bounds.left >= screenWidth || bounds.top >= screenHeight) {
+            return null
+        }
+        val left = bounds.left.coerceIn(0, screenWidth - 1)
+        val top = bounds.top.coerceIn(0, screenHeight - 1)
+        val right = bounds.right.coerceIn(left + 1, screenWidth)
+        val bottom = bounds.bottom.coerceIn(top + 1, screenHeight)
+        return Rect(left, top, right, bottom)
+    }
+
     private fun clickAt(bounds: Rect): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastClickAt < CLICK_COOLDOWN_MS || gestureInFlight) {
@@ -128,16 +140,16 @@ class AalamAccessibilityService : AccessibilityService() {
             return false
         }
 
-        val centerX = bounds.exactCenterX()
-        val centerY = bounds.exactCenterY()
+        val safeBounds = clampToScreen(bounds) ?: run {
+            Log.w(TAG, "Gesture skipped: bounds outside screen: $bounds")
+            return false
+        }
+        val centerX = safeBounds.exactCenterX()
+        val centerY = safeBounds.exactCenterY()
+        Log.d(TAG, "Attempting screen tap at ($centerX, $centerY), bounds=$safeBounds")
         val path = Path().apply {
             moveTo(centerX, centerY)
-            lineTo(centerX + 1f, centerY + 1f)
-        }
-
-        if (centerX < 0 || centerY < 0 || centerX > screenWidth || centerY > screenHeight) {
-            Log.w(TAG, "Gesture skipped: center outside screen")
-            return false
+            lineTo(centerX, centerY)
         }
 
         val gesture = GestureDescription.Builder()
@@ -202,7 +214,10 @@ class AalamAccessibilityService : AccessibilityService() {
     private fun findCandidate(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val label = listOf(node.text, node.contentDescription)
             .filterNotNull().joinToString(" ")
-        if (OcrKeywords.containsAccept(label) && node.isVisibleToUser && node.isEnabled) {
+        val flexibleActionMatch = listOf("accept", "confirm", "yes", "ok")
+            .any { label.contains(it, ignoreCase = true) }
+        if ((OcrKeywords.containsAccept(label) || flexibleActionMatch) &&
+            node.isVisibleToUser && node.isEnabled) {
             return AccessibilityNodeInfo.obtain(node)
         }
         for (i in 0 until node.childCount) {
@@ -237,7 +252,7 @@ class AalamAccessibilityService : AccessibilityService() {
         val cy = bounds.exactCenterY()
         val path = Path().apply {
             moveTo(cx, cy)
-            lineTo(cx + 1f, cy + 1f)
+            lineTo(cx, cy)
         }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, STROKE_MS))
