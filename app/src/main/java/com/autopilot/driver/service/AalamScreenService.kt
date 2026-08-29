@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
@@ -75,6 +76,14 @@ class AalamScreenService : Service() {
     private var screenHeight = 0
     private var captureWidth = 0
     private var captureHeight = 0
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.w(tag, "MediaProjection stopped by system")
+            projection = null
+            handler.post { stopSelf() }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -131,6 +140,7 @@ class AalamScreenService : Service() {
         if (projection == null) {
             val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             projection = manager.getMediaProjection(resultCode, data)
+            projection?.registerCallback(projectionCallback, handler)
             startCapture()
         }
         return START_STICKY
@@ -158,7 +168,11 @@ class AalamScreenService : Service() {
 
     private val captureLoop = object : Runnable {
         override fun run() {
-            if (!isRunning || isPaused) return
+            if (!isRunning || isPaused || destroyed) return
+            if (projection == null) {
+                Log.w(tag, "Projection lost, stopping capture loop")
+                return
+            }
             val isRideApp = AalamAccessibilityService.foregroundPackage in setOf(
                 "com.rapido.rider", "com.olacabs.oladriver",
                 "com.ubercab.driver", "com.ubercab"
@@ -333,21 +347,28 @@ class AalamScreenService : Service() {
             reader?.close()
             reader = null
         }
+        projection?.unregisterCallback(projectionCallback)
         projection?.stop()
-        if (ocrJob == null) {
-            synchronized(bitmapLock) {
-                currentBitmap?.let { if (!it.isRecycled) it.recycle() }
-                currentBitmap = null
-            }
-            recognizer.close()
-        } else {
-            ocrJob?.invokeOnCompletion { recognizer.close() }
+
+        // Cancel any pending OCR and wait for it to finish
+        ocrJob?.cancel()
+        runBlocking {
+            try {
+                ocrJob?.join()
+            } catch (_: Exception) { }
         }
+
+        synchronized(bitmapLock) {
+            currentBitmap?.let { if (!it.isRecycled) it.recycle() }
+            currentBitmap = null
+        }
+        recognizer.close()
+
         sendBroadcast(
             Intent("aalam.update")
                 .setPackage(packageName)
                 .putExtra("state", "STOPPED")
-                .putExtra("sender", "internal"),
+                .putExtra("sender", "internal")
         )
         super.onDestroy()
     }
