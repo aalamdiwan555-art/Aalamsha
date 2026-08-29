@@ -82,6 +82,8 @@ fun AalamScreen(
     )
     var minimumPrice by rememberSaveable { mutableStateOf("100") }
     var maximumPrice by rememberSaveable { mutableStateOf("150") }
+    var isUserEditing by remember { mutableStateOf(false) }
+    var isTransitioning by remember { mutableStateOf(false) }
     var isRunning by remember { mutableStateOf(AalamScreenService.isRunning) }
     var overlayEnabled by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var accessibilityEnabled by remember { mutableStateOf(AalamAccessibilityService.isEnabled(context)) }
@@ -95,8 +97,10 @@ fun AalamScreen(
     }
 
     LaunchedEffect(storedSettings.minimumPrice, storedSettings.maximumPrice) {
-        minimumPrice = storedSettings.minimumPrice.toString()
-        maximumPrice = storedSettings.maximumPrice.toString()
+        if (!isUserEditing) {
+            minimumPrice = storedSettings.minimumPrice.toString()
+            maximumPrice = storedSettings.maximumPrice.toString()
+        }
     }
 
     LaunchedEffect(minimumPrice, maximumPrice) {
@@ -106,11 +110,13 @@ fun AalamScreen(
         if (min != null && max != null && min > 0 && max > 0 && min <= max) {
             settingsStore.savePriceRange(min, max)
         }
+        isUserEditing = false
     }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                isTransitioning = false
                 isRunning = AalamScreenService.isRunning
                 captureGranted = AalamScreenService.isRunning
                 overlayEnabled = Settings.canDrawOverlays(context)
@@ -158,27 +164,34 @@ fun AalamScreen(
         PriceCard(
             minimum = minimumPrice,
             maximum = maximumPrice,
-            onMinimumChanged = { minimumPrice = it },
-            onMaximumChanged = { maximumPrice = it },
+            onMinimumChanged = { isUserEditing = true; minimumPrice = it },
+            onMaximumChanged = { isUserEditing = true; maximumPrice = it },
         )
 
         // Control Buttons
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
                 onClick = {
-                    if (validPriceRange) {
-                        if (isRunning) {
-                            onPause()
-                            isRunning = false
-                        } else {
-                            onStart()
-                        }
+                    if (isTransitioning) return@Button
+                    if (!isRunning && !validPriceRange) return@Button
+                    isTransitioning = true
+                    if (isRunning) {
+                        onPause()
+                        isRunning = false
+                    } else {
+                        onStart()
                     }
                 },
+                enabled = !isTransitioning,
                 modifier = Modifier.weight(1f).height(52.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = teal, contentColor = ink),
-            ) { Text(if (isRunning) stringResource(R.string.pause) else stringResource(R.string.start), fontWeight = FontWeight.Bold) }
+            ) {
+                Text(
+                    if (isRunning) stringResource(R.string.pause) else stringResource(R.string.start),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
 
             Button(
                 onClick = { onStop(); isRunning = false },
@@ -299,13 +312,20 @@ private fun PriceCard(
 }
 
 private fun sanitizePriceInput(value: String): String {
+    if (value.isEmpty()) return ""
+
+    // Only keep digits and at most one decimal point
     val filtered = value.filter { it.isDigit() || it == '.' }
-    val separator = filtered.indexOf('.')
-    return if (separator < 0) {
-        filtered
+    val firstDot = filtered.indexOf('.')
+
+    return if (firstDot < 0) {
+        // No decimal - remove leading zeros unless it's just "0"
+        filtered.trimStart('0').ifEmpty { "0" }
     } else {
-        filtered.substring(0, separator + 1) +
-            filtered.substring(separator + 1).replace(".", "")
+        // Has decimal - keep first dot, remove rest
+        val beforeDot = filtered.substring(0, firstDot).trimStart('0').ifEmpty { "0" }
+        val afterDot = filtered.substring(firstDot + 1).replace(".", "")
+        "$beforeDot.$afterDot"
     }
 }
 
