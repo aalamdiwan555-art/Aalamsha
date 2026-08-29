@@ -51,9 +51,9 @@ class AalamScreenService : Service() {
         private const val INTERVAL_MS = 3500L
         private const val FAST_INTERVAL_MS = 1000L
         private const val IDLE_INTERVAL_MS = 5000L
-        private const val ACTION_PAUSE = "com.autopilot.driver.action.PAUSE"
-        private const val ACTION_RESUME = "com.autopilot.driver.action.RESUME"
-        private const val ACTION_STOP = "com.autopilot.driver.action.STOP"
+        const val ACTION_PAUSE = "com.autopilot.driver.action.PAUSE"
+        const val ACTION_RESUME = "com.autopilot.driver.action.RESUME"
+        const val ACTION_STOP = "com.autopilot.driver.action.STOP"
         @Volatile var isRunning = false
         @Volatile var isPaused = false
     }
@@ -108,18 +108,30 @@ class AalamScreenService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PAUSE -> {
-                isPaused = true
-                handler.removeCallbacks(captureLoop)
-                updateNotification(getString(com.autopilot.driver.R.string.status_paused))
-                return START_STICKY
-            }
+                  isPaused = true
+                  handler.removeCallbacks(captureLoop)
+                  updateNotification(getString(com.autopilot.driver.R.string.status_paused))
+                  sendBroadcast(
+                      Intent("aalam.update")
+                          .setPackage(packageName)
+                          .putExtra("state", "PAUSED")
+                          .putExtra("sender", "internal")
+                  )
+                  return START_STICKY
+              }
             ACTION_RESUME -> {
-                isPaused = false
-                handler.removeCallbacks(captureLoop)
-                handler.post(captureLoop)
-                updateNotification(getString(com.autopilot.driver.R.string.status_watching))
-                return START_STICKY
-            }
+                  isPaused = false
+                  handler.removeCallbacks(captureLoop)
+                  handler.post(captureLoop)
+                  updateNotification(getString(com.autopilot.driver.R.string.status_watching))
+                  sendBroadcast(
+                      Intent("aalam.update")
+                          .setPackage(packageName)
+                          .putExtra("state", "RUNNING")
+                          .putExtra("sender", "internal")
+                  )
+                  return START_STICKY
+              }
             ACTION_STOP -> {
                 stopSelf()
                 return START_NOT_STICKY
@@ -173,10 +185,7 @@ class AalamScreenService : Service() {
                 Log.w(tag, "Projection lost, stopping capture loop")
                 return
             }
-            val isRideApp = AalamAccessibilityService.foregroundPackage in setOf(
-                "com.rapido.rider", "com.olacabs.oladriver",
-                "com.ubercab.driver", "com.ubercab"
-            )
+            val isRideApp = AalamAccessibilityService.foregroundPackage in AalamAccessibilityService.RIDE_PACKAGES
             if (isRideApp) {
                 processLatestFrame()
             }
@@ -363,6 +372,7 @@ class AalamScreenService : Service() {
             currentBitmap = null
         }
         recognizer.close()
+        scope.cancel()
 
         sendBroadcast(
             Intent("aalam.update")
