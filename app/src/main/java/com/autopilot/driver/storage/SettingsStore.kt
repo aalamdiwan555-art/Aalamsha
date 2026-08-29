@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.map
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "aalam_settings")
 
 class SettingsStore(private val context: Context) {
-    private object Keys {
+    private object PreferencesKeys {
         val minimumPrice = doublePreferencesKey("minimum_price")
         val maximumPrice = doublePreferencesKey("maximum_price")
         val onboardingComplete = booleanPreferencesKey("onboarding_complete")
@@ -32,27 +32,27 @@ class SettingsStore(private val context: Context) {
 
     val settings: Flow<StoredSettings> = context.dataStore.data.map { prefs ->
         StoredSettings(
-            minimumPrice = prefs[Keys.minimumPrice] ?: 100.0,
-            maximumPrice = prefs[Keys.maximumPrice] ?: 150.0,
-            onboardingComplete = prefs[Keys.onboardingComplete] ?: false,
-            captureGranted = prefs[Keys.captureGranted] ?: false,
-            autopilotEnabled = prefs[Keys.autopilotEnabled] ?: false,
+            minimumPrice = prefs[PreferencesKeys.minimumPrice] ?: 100.0,
+            maximumPrice = prefs[PreferencesKeys.maximumPrice] ?: 150.0,
+            onboardingComplete = prefs[PreferencesKeys.onboardingComplete] ?: false,
+            captureGranted = prefs[PreferencesKeys.captureGranted] ?: false,
+            autopilotEnabled = prefs[PreferencesKeys.autopilotEnabled] ?: false,
         )
     }
 
     suspend fun savePriceRange(minimum: Double, maximum: Double) {
-        context.dataStore.edit { it[Keys.minimumPrice] = minimum; it[Keys.maximumPrice] = maximum }
+        context.dataStore.edit { it[PreferencesKeys.minimumPrice] = minimum; it[PreferencesKeys.maximumPrice] = maximum }
     }
 
     suspend fun setOnboardingComplete(value: Boolean) {
-        context.dataStore.edit { it[Keys.onboardingComplete] = value }
+        context.dataStore.edit { it[PreferencesKeys.onboardingComplete] = value }
     }
 
     suspend fun setCaptureGranted(value: Boolean) {
-        context.dataStore.edit { it[Keys.captureGranted] = value }
+        context.dataStore.edit { it[PreferencesKeys.captureGranted] = value }
     }
 
     suspend fun setAutopilotEnabled(value: Boolean) {
-        context.dataStore.edit { it[Keys.autopilotEnabled] = value }
+        context.dataStore.edit { it[PreferencesKeys.autopilotEnabled] = value }
     }
 }

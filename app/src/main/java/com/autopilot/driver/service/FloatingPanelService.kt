@@ -19,10 +19,15 @@ import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import androidx.core.content.ContextCompat
+import com.autopilot.driver.AalamLog
 import com.autopilot.driver.R
 import com.autopilot.driver.automation.AalamAccessibilityService
 
 class FloatingPanelService : Service() {
+    private companion object {
+        const val TAG = AalamLog.TAG
+    }
+
     private var windowManager: WindowManager? = null
     private var panel: View? = null
     private var panelParams: WindowManager.LayoutParams? = null
@@ -32,6 +37,7 @@ class FloatingPanelService : Service() {
     private val runtimeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != "aalam.update") return
+            if (intent.`package` != packageName && intent.getStringExtra("sender") != "internal") return
             val state = intent.getStringExtra("state") ?: "STOPPED"
             if (state == "STOPPED" || state == "ERROR") {
                 stopSelf()
@@ -45,12 +51,19 @@ class FloatingPanelService : Service() {
             stopSelf()
             return
         }
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager = getSystemService(WINDOW_SERVICE) as? WindowManager
+        if (windowManager == null) {
+            android.util.Log.e(TAG, "WindowManager is not available")
+            stopSelf()
+            return
+        }
         registerRuntimeReceiver()
         buildPanel()
     }
 
     private fun buildPanel() {
+        if (panel != null) return
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(14, 14, 14, 12)
@@ -116,7 +129,13 @@ class FloatingPanelService : Service() {
         }
         panelParams = params
         panel = root
-        windowManager?.addView(root, params)
+        runCatching { windowManager?.addView(root, params) }
+            .onFailure {
+                android.util.Log.e(TAG, "Unable to attach floating panel", it)
+                panel = null
+                panelParams = null
+                stopSelf()
+            }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -164,6 +183,8 @@ class FloatingPanelService : Service() {
         runCatching { unregisterReceiver(runtimeReceiver) }
         panel?.let { view -> runCatching { windowManager?.removeView(view) } }
         panel = null
+        panelParams = null
+        windowManager = null
         super.onDestroy()
     }
 

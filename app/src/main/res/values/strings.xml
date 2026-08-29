@@ -1,6 +1,32 @@
 <resources>
-    <string name="app_name">Aalam</string>
-    <string name="accessibility_service_description">Allows Aalam to detect and tap ride accept buttons across all Indian languages.</string>
-    <string name="notification_channel_name">Aalam monitoring</string>
-    <string name="notification_channel_description">Shows the current Aalam monitoring state.</string>
+    <string name="app_name">Autopilot</string>
+    <string name="accessibility_service_description">Autopilot uses accessibility features to assist with automated interactions in supported applications.</string>
+    <string name="notification_channel_name">Autopilot monitoring</string>
+    <string name="notification_channel_description">Shows the current Autopilot monitoring state.</string>
+    <string name="status_watching">Watching for ride offers</string>
+    <string name="status_paused">Paused — tap RESUME to continue</string>
+    <string name="app_title">AUTOPILOT</string>
+    <string name="app_subtitle">DRIVER ASSISTANT</string>
+    <string name="status">STATUS</string>
+    <string name="status_running">RUNNING</string>
+    <string name="status_ready">READY</string>
+    <string name="status_tap_start">Tap START to begin monitoring</string>
+    <string name="price_range">PRICE RANGE</string>
+    <string name="min_price">MIN PRICE</string>
+    <string name="max_price">MAX PRICE</string>
+    <string name="currency_prefix">Rs </string>
+    <string name="price_range_error">Enter positive prices with minimum no greater than maximum.</string>
+    <string name="start">START</string>
+    <string name="pause">PAUSE</string>
+    <string name="stop">STOP</string>
+    <string name="permissions">PERMISSIONS</string>
+    <string name="accessibility_service">Accessibility Service</string>
+    <string name="overlay_permission">Overlay Permission</string>
+    <string name="screen_capture">Screen Capture</string>
+    <string name="notifications">Notifications</string>
+    <string name="granted">GRANTED</string>
+    <string name="enable">ENABLE</string>
+    <string name="floating_control_panel">FLOATING CONTROL PANEL</string>
+    <string name="floating_panel_desc">Show controls above other apps</string>
+    <string name="info_text">Autopilot assists with automated interactions in supported applications. Enable Accessibility and Screen Capture permissions to start.</string>
 </resources>

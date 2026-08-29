@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.ContextCompat
 import com.autopilot.driver.automation.AalamAccessibilityService
 import com.autopilot.driver.service.AalamScreenService
 import com.autopilot.driver.service.FloatingPanelService
@@ -32,7 +33,8 @@ class MainActivity : ComponentActivity() {
     private var receiverRegistered = false
     private val runtimeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            // Handle runtime updates if needed
+            if (intent?.action != "aalam.update") return
+            if (intent.`package` != packageName && intent.getStringExtra("sender") != "internal") return
         }
     }
 
@@ -58,20 +60,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settingsStore = SettingsStore(this)
+        lifecycleScope.launch {
+            if (!AalamScreenService.isRunning) {
+                settingsStore.setCaptureGranted(false)
+                settingsStore.setAutopilotEnabled(false)
+            }
+        }
 
         val filter = IntentFilter("aalam.update")
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(runtimeReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(runtimeReceiver, filter)
-        }
+        ContextCompat.registerReceiver(this, runtimeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         receiverRegistered = true
 
         setContent {
             AalamTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AalamScreen(
+                        settingsStore = settingsStore,
                         onStart = { startAalam() },
                         onPause = { pauseAalam() },
                         onStop = { stopAalam() },
@@ -86,6 +90,7 @@ class MainActivity : ComponentActivity() {
                                 requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 11)
                             }
                         },
+                        onRequestCapture = { startAalam() },
                     )
                 }
             }
@@ -105,7 +110,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             settingsStore.setAutopilotEnabled(false)
         }
-        stopService(Intent(this, AalamScreenService::class.java))
+        startService(Intent(this, AalamScreenService::class.java).setAction("com.autopilot.driver.action.PAUSE"))
     }
 
     private fun stopAalam() {

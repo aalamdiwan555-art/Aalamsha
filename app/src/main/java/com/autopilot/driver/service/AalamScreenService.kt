@@ -20,7 +20,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.autopilot.driver.AalamLog
 import com.autopilot.driver.R
 import com.autopilot.driver.automation.AalamAccessibilityService
 import com.autopilot.driver.OcrKeywords
@@ -34,6 +36,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -44,14 +47,27 @@ class AalamScreenService : Service() {
         const val EXTRA_RESULT_DATA = "result_data"
         private const val CHANNEL = "aalam_running"
         private const val NOTIFICATION_ID = 41
-        private const val INTERVAL_MS = 1500L
+        private const val INTERVAL_MS = 3500L
+        private const val FAST_INTERVAL_MS = 1000L
+        private const val IDLE_INTERVAL_MS = 5000L
+        private const val ACTION_PAUSE = "com.autopilot.driver.action.PAUSE"
+        private const val ACTION_RESUME = "com.autopilot.driver.action.RESUME"
+        private const val ACTION_STOP = "com.autopilot.driver.action.STOP"
         @Volatile var isRunning = false
+        @Volatile var isPaused = false
     }
 
+    private val tag = AalamLog.TAG
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val ocrInFlight = AtomicBoolean(false)
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val readerLock = Any()
+    private val bitmapLock = Any()
+    private var currentBitmap: Bitmap? = null
+    private var ocrJob: Job? = null
+    private var destroyed = false
+    private var lastFrameHadHint = false
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
@@ -63,6 +79,8 @@ class AalamScreenService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        isPaused = false
+        destroyed = false
         createChannel()
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_autopilot)
@@ -79,6 +97,26 @@ class AalamScreenService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PAUSE -> {
+                isPaused = true
+                handler.removeCallbacks(captureLoop)
+                updateNotification(getString(com.autopilot.driver.R.string.status_paused))
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                isPaused = false
+                handler.removeCallbacks(captureLoop)
+                handler.post(captureLoop)
+                updateNotification(getString(com.autopilot.driver.R.string.status_watching))
+                return START_STICKY
+            }
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -120,48 +158,81 @@ class AalamScreenService : Service() {
 
     private val captureLoop = object : Runnable {
         override fun run() {
-            if (isRunning && AalamAccessibilityService.foregroundPackage in setOf(
+            if (!isRunning || isPaused) return
+            val isRideApp = AalamAccessibilityService.foregroundPackage in setOf(
                 "com.rapido.rider", "com.olacabs.oladriver",
                 "com.ubercab.driver", "com.ubercab"
-            )) {
+            )
+            if (isRideApp) {
                 processLatestFrame()
             }
-            handler.postDelayed(this, INTERVAL_MS)
+            val nextInterval = when {
+                !isRideApp -> IDLE_INTERVAL_MS
+                lastFrameHadHint -> FAST_INTERVAL_MS
+                else -> INTERVAL_MS
+            }
+            handler.postDelayed(this, nextInterval)
         }
     }
 
     private fun processLatestFrame() {
         if (!ocrInFlight.compareAndSet(false, true)) return
-        val image = reader?.acquireLatestImage()
+        val image = try {
+            synchronized(readerLock) { reader?.acquireLatestImage() }
+        } catch (error: IllegalStateException) {
+            Log.w(tag, "ImageReader closed during frame acquisition", error)
+            ocrInFlight.set(false)
+            return
+        }
         if (image == null) {
             ocrInFlight.set(false)
             return
         }
-        try {
-            val bitmap = imageToBitmap(image)
+        val bitmap = try {
+            imageToBitmap(image)
+        } catch (error: Exception) {
+            Log.e(tag, "Unable to convert captured frame", error)
+            null
+        } finally {
             image.close()
-            scope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
-                    }
-                    if (OcrKeywords.containsAccept(result.text)) {
-                        val targetBounds = findAcceptBounds(result)
-                        if (targetBounds != null) {
-                            val screenBounds = mapCaptureBoundsToScreen(targetBounds)
-                            AalamAccessibilityService.requestAcceptClick(screenBounds)
-                        } else {
-                            AalamAccessibilityService.requestAcceptClick()
-                        }
-                    }
-                } finally {
-                    bitmap.recycle()
-                    ocrInFlight.set(false)
-                }
-            }
-        } catch (_: Exception) {
-            image.close()
+        }
+        if (bitmap == null) {
             ocrInFlight.set(false)
+            return
+        }
+        synchronized(bitmapLock) {
+            if (destroyed) {
+                bitmap.recycle()
+                ocrInFlight.set(false)
+                return
+            }
+            currentBitmap = bitmap
+        }
+        ocrJob = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
+                }
+                lastFrameHadHint = result.text.contains("ride", ignoreCase = true) ||
+                    result.text.contains("new", ignoreCase = true) ||
+                    result.text.contains("booking", ignoreCase = true)
+                if (OcrKeywords.containsAccept(result.text)) {
+                    val targetBounds = findAcceptBounds(result)
+                    if (targetBounds != null) {
+                        AalamAccessibilityService.requestAcceptClick(mapCaptureBoundsToScreen(targetBounds))
+                    } else {
+                        AalamAccessibilityService.requestAcceptClick()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e(tag, "OCR failed", error)
+            } finally {
+                synchronized(bitmapLock) {
+                    if (currentBitmap === bitmap) currentBitmap = null
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+                ocrInFlight.set(false)
+            }
         }
     }
 
@@ -174,13 +245,27 @@ class AalamScreenService : Service() {
         val paddedWidth = image.width + rowPadding / pixelStride
         val paddedBitmap = Bitmap.createBitmap(paddedWidth, image.height, Bitmap.Config.ARGB_8888)
         paddedBitmap.copyPixelsFromBuffer(buffer)
-        return if (paddedWidth == image.width) {
+        val source = if (paddedWidth == image.width) {
             paddedBitmap
         } else {
             val croppedBitmap = Bitmap.createBitmap(paddedBitmap, 0, 0, image.width, image.height)
             paddedBitmap.recycle()
             croppedBitmap
         }
+        val maxDimension = 720
+        if (source.width <= maxDimension && source.height <= maxDimension) return source
+        val ratio = minOf(
+            maxDimension.toFloat() / source.width,
+            maxDimension.toFloat() / source.height,
+        )
+        val scaled = Bitmap.createScaledBitmap(
+            source,
+            (source.width * ratio).toInt(),
+            (source.height * ratio).toInt(),
+            true,
+        )
+        source.recycle()
+        return scaled
     }
 
     private fun findAcceptBounds(result: com.google.mlkit.vision.text.Text): Rect? {
@@ -213,21 +298,57 @@ class AalamScreenService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, getString(R.string.notification_channel_name), NotificationManager.IMPORTANCE_LOW)
-            )
+            val channel = NotificationChannel(
+                CHANNEL,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = getString(R.string.notification_channel_description)
+                setShowBadge(false)
+                enableVibration(false)
+                enableLights(false)
+            }
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
+    private fun updateNotification(text: String) {
+        val notification = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_autopilot)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(text)
+            .setOngoing(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+    }
+
     override fun onDestroy() {
+        destroyed = true
         handler.removeCallbacksAndMessages(null)
         isRunning = false
+        isPaused = false
         ocrInFlight.set(false)
         display?.release()
-        reader?.close()
+        synchronized(readerLock) {
+            reader?.close()
+            reader = null
+        }
         projection?.stop()
-        recognizer.close()
-        scope.cancel()
+        if (ocrJob == null) {
+            synchronized(bitmapLock) {
+                currentBitmap?.let { if (!it.isRecycled) it.recycle() }
+                currentBitmap = null
+            }
+            recognizer.close()
+        } else {
+            ocrJob?.invokeOnCompletion { recognizer.close() }
+        }
+        sendBroadcast(
+            Intent("aalam.update")
+                .setPackage(packageName)
+                .putExtra("state", "STOPPED")
+                .putExtra("sender", "internal"),
+        )
         super.onDestroy()
     }
 

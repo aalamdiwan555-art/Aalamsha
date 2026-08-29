@@ -13,12 +13,13 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.autopilot.driver.OcrKeywords
+import com.autopilot.driver.AalamLog
 import kotlin.math.roundToInt
 
 class AalamAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val TAG = "AalamService"
+        private const val TAG = AalamLog.TAG
         private const val CLICK_COOLDOWN_MS = 500L
         private const val STROKE_MS = 100L
         @Volatile var instance: AalamAccessibilityService? = null
@@ -40,7 +41,6 @@ class AalamAccessibilityService : AccessibilityService() {
             "com.application.zomato",
             "com.zepto.rider",
             "com.blinkit.delivery",
-            "com.dunzo.user",
             "com.ninjacart",
             "com.shadowfax",
             "com.loadshare",
@@ -85,7 +85,6 @@ class AalamAccessibilityService : AccessibilityService() {
             "com.zoom.us",
             "com.webex.meetings",
             "com.skype.raider",
-            "com.whatsapp.w4b",
             "com.facebook.orca",
             "com.google.android.apps.messaging",
             "com.android.chrome",
@@ -136,10 +135,12 @@ class AalamAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var lastClickAt = 0L
     private var gestureInFlight = false
+    @Volatile private var destroyed = false
     private var screenWidth = 0
     private var screenHeight = 0
 
     override fun onServiceConnected() {
+        destroyed = false
         instance = this
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
@@ -160,7 +161,12 @@ class AalamAccessibilityService : AccessibilityService() {
     }
 
     private fun requestClick(bounds: Rect?) {
+        if (destroyed) {
+            Log.w(TAG, "Ignoring click request after service destruction")
+            return
+        }
         mainHandler.post {
+            if (destroyed) return@post
             if (bounds == null || !clickAt(bounds)) clickAccept()
         }
     }
@@ -263,7 +269,8 @@ class AalamAccessibilityService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            val result = try { findCandidate(child) } finally { child.recycle() }
+            val result = findCandidate(child)
+            child.recycle()
             if (result != null) return result
         }
         return null
@@ -321,6 +328,7 @@ class AalamAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        destroyed = true
         mainHandler.removeCallbacksAndMessages(null)
         gestureInFlight = false
         if (instance === this) instance = null
