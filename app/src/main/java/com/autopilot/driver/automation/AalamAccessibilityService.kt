@@ -26,7 +26,7 @@ class AalamAccessibilityService : AccessibilityService() {
             private set
         @Volatile var foregroundPackage: String = ""
 
-        private val RIDE_PACKAGES = setOf(
+        val RIDE_PACKAGES = setOf(
             "com.rapido.rider",
             "com.olacabs.oladriver",
             "com.ubercab.driver",
@@ -188,7 +188,11 @@ class AalamAccessibilityService : AccessibilityService() {
             Log.w(TAG, "Node click skipped: no active window")
             return false
         }
-        val candidate = findCandidate(root)
+        val candidate = try {
+            findCandidate(root)
+        } finally {
+            root.recycle()
+        }
         if (candidate != null) {
             val clicked = performClick(candidate)
             if (clicked && !gestureInFlight) {
