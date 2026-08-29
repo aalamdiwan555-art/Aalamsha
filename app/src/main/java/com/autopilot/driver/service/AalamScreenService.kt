@@ -182,18 +182,13 @@ class AalamScreenService : Service() {
         override fun run() {
             if (!isRunning || isPaused || destroyed) return
             if (projection == null) {
-                Log.w(tag, "Projection lost, stopping capture loop")
+                Log.w(tag, "Projection lost, pausing capture loop")
+                handler.postDelayed(this, IDLE_INTERVAL_MS)
                 return
             }
-            val isRideApp = AalamAccessibilityService.foregroundPackage in AalamAccessibilityService.RIDE_PACKAGES
-            if (isRideApp) {
-                processLatestFrame()
-            }
-            val nextInterval = when {
-                !isRideApp -> IDLE_INTERVAL_MS
-                lastFrameHadHint -> FAST_INTERVAL_MS
-                else -> INTERVAL_MS
-            }
+            // Scan the currently visible app; the user explicitly enabled any-app mode.
+            processLatestFrame()
+            val nextInterval = if (lastFrameHadHint) FAST_INTERVAL_MS else INTERVAL_MS
             handler.postDelayed(this, nextInterval)
         }
     }
