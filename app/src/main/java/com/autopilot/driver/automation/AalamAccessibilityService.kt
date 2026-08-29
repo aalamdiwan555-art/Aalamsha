@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.autopilot.driver.OcrKeywords
 import com.autopilot.driver.AalamLog
+import com.autopilot.driver.service.AalamScreenService
 import kotlin.math.roundToInt
 
 class AalamAccessibilityService : AccessibilityService() {
@@ -81,6 +82,16 @@ class AalamAccessibilityService : AccessibilityService() {
     private var screenWidth = 0
     private var screenHeight = 0
 
+    // Accessibility events are the primary path; OCR remains a coordinate fallback.
+    private val treeScan = object : Runnable {
+        override fun run() {
+            if (destroyed || !AalamScreenService.isRunning || AalamScreenService.isPaused) return
+            if (clickAccept()) {
+                Log.i(TAG, "Accessibility tree click completed after UI change")
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         destroyed = false
         instance = this
@@ -99,7 +110,19 @@ class AalamAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        foregroundPackage = event?.packageName?.toString().orEmpty()
+        val pkg = event?.packageName?.toString().orEmpty()
+        foregroundPackage = pkg
+
+        // Only scan while the user has started Aalam, and never scan our own controls.
+        if (pkg.isEmpty() || pkg == packageName || !AalamScreenService.isRunning || AalamScreenService.isPaused) return
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                // Coalesce event bursts and let the target UI finish rendering.
+                mainHandler.removeCallbacks(treeScan)
+                mainHandler.postDelayed(treeScan, 120L)
+            }
+        }
     }
 
     private fun requestClick(bounds: Rect?) {
