@@ -54,7 +54,8 @@ fun AalamScreen(
     val storedSettings by settingsStore.settings.collectAsStateWithLifecycle(initialValue = SettingsStore.StoredSettings())
     var minimumPrice by remember { mutableStateOf("100") }
     var maximumPrice by remember { mutableStateOf("150") }
-    var isUserEditing by remember { mutableStateOf(false) }
+    var pendingPriceSave by remember { mutableStateOf(false) }
+    var pricesHydrated by remember { mutableStateOf(false) }
     var isTransitioning by remember { mutableStateOf(false) }
     var isRunning by remember { mutableStateOf(AalamScreenService.isRunning) }
     var overlayEnabled by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
@@ -63,17 +64,27 @@ fun AalamScreen(
     var notificationsGranted by remember { mutableStateOf(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) }
 
     LaunchedEffect(storedSettings.minimumPrice, storedSettings.maximumPrice) {
-        if (!isUserEditing) {
+        if (!pendingPriceSave) {
             minimumPrice = storedSettings.minimumPrice.toString()
             maximumPrice = storedSettings.maximumPrice.toString()
+            pricesHydrated = true
         }
     }
-    LaunchedEffect(minimumPrice, maximumPrice) {
+    LaunchedEffect(minimumPrice, maximumPrice, pricesHydrated) {
+        if (!pricesHydrated) return@LaunchedEffect
         delay(400)
         val min = minimumPrice.toDoubleOrNull()
         val max = maximumPrice.toDoubleOrNull()
-        if (min != null && max != null && min > 0 && max > 0 && min <= max) settingsStore.savePriceRange(min, max)
-        isUserEditing = false
+        if (min != null && max != null && min > 0 && max > 0 && min <= max) {
+            settingsStore.savePriceRange(min, max)
+            pendingPriceSave = false
+        }
+    }
+    LaunchedEffect(isTransitioning) {
+        if (isTransitioning) {
+            delay(10_000)
+            isTransitioning = false
+        }
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -102,9 +113,9 @@ fun AalamScreen(
             }
         }
         StatusCard(isRunning)
-        PriceCard(minimum = minimumPrice, maximum = maximumPrice, onMinimumChanged = { isUserEditing = true; minimumPrice = it }, onMaximumChanged = { isUserEditing = true; maximumPrice = it })
+        PriceCard(minimum = minimumPrice, maximum = maximumPrice, onMinimumChanged = { pendingPriceSave = true; minimumPrice = it }, onMaximumChanged = { pendingPriceSave = true; maximumPrice = it })
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { if (isTransitioning) return@Button; if (!isRunning && !validPriceRange) return@Button; isTransitioning = true; if (isRunning) { onPause(); isRunning = false } else { onStart() } }, enabled = !isTransitioning, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = teal, contentColor = ink)) {
+            Button(onClick = { if (isTransitioning) return@Button; if (!isRunning && !validPriceRange) return@Button; isTransitioning = true; if (isRunning) { onPause() } else { onStart() } }, enabled = !isTransitioning, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = teal, contentColor = ink)) {
                 Text(if (isRunning) stringResource(R.string.pause) else stringResource(R.string.start), fontWeight = FontWeight.Bold)
             }
             Button(onClick = { onStop(); isRunning = false }, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE35D6A), contentColor = Color.White)) { Text(stringResource(R.string.stop), fontWeight = FontWeight.Bold) }
